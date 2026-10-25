@@ -1,5 +1,6 @@
 from http import HTTPStatus
 from http.client import responses
+from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, APIRouter, Request, status, Response, HTTPException
 from fastapi.responses import JSONResponse
@@ -14,8 +15,21 @@ logging.basicConfig(level=logging.INFO,
                     filename="app.log"
                     )
 
+# Creating pooled client connection
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.http_client = httpx.AsyncClient(
+        timeout=10.0
+    )
+    logging.info("Shared HTTPX client initialized")
+    try:
+        yield
+    finally:
+        await app.state.http_client.aclose()
+        logging.info("Shared HTTPX client closed")
 
-app = FastAPI()
+
+app = FastAPI(lifespan=lifespan)
 router = APIRouter()
 TIMEOUT = (10,30)
 
@@ -124,13 +138,13 @@ async def product_gateway(request: Request, product_id: int):
             f"http://127.0.0.1:10001/products/{product_id}",
         )
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url,
-                headers=http_data,
-                params=request.query_params,
-                timeout=10
-            )
+        client = request.app.state.http_client # Use the created connection instance
+
+        response = await client.get(
+            url,
+            headers=http_data,
+            params=request.query_params,
+        )
 
         logging.info(
             "Downstream response | id=%s | status=%s | content_type=%s | bytes=%s",
