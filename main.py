@@ -1,6 +1,6 @@
 from http import HTTPStatus
 from http.client import responses
-
+import httpx
 from fastapi import FastAPI, APIRouter, Request, status, Response, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -106,9 +106,10 @@ def list_products():
 
 
 @router.get("/api/products/{product_id}", include_in_schema=False)
-def product_gateway(request: Request, product_id: int):
+async def product_gateway(request: Request, product_id: int):
     try:
         # start = time.perf_counter()
+        url = f"http://127.0.0.1:10001/products/{product_id}"
 
         # Reuse the request ID created by middleware
         req_id = request.state.request_id
@@ -123,12 +124,13 @@ def product_gateway(request: Request, product_id: int):
             f"http://127.0.0.1:10001/products/{product_id}",
         )
 
-        response = requests.get(
-            f"http://127.0.0.1:10001/products/{product_id}",
-            headers=http_data,
-            params=request.query_params,
-            timeout=TIMEOUT,
-        )
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                headers=http_data,
+                params=request.query_params,
+                timeout=10
+            )
 
         logging.info(
             "Downstream response | id=%s | status=%s | content_type=%s | bytes=%s",
@@ -145,12 +147,10 @@ def product_gateway(request: Request, product_id: int):
             content=response.content,
             status_code=response.status_code,
             media_type=response.headers.get("content-type")
-            # headers={
-            #     "X-Request-Duration": f"{(end_time - start) * 1000:.2f}ms"
-            # },
+
         )
 
-    except requests.Timeout:
+    except httpx.TimeoutException:
         logging.exception(
             "Downstream request timed out | id=%s",
             getattr(request.state, "request_id", "unknown"),
@@ -160,7 +160,7 @@ def product_gateway(request: Request, product_id: int):
             detail="Downstream service timed out",
         )
 
-    except requests.RequestException:
+    except httpx.RequestError:
         logging.exception(
             "Downstream request failed | id=%s",
             getattr(request.state, "request_id", "unknown"),
