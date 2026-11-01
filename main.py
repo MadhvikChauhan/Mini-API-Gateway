@@ -90,6 +90,15 @@ def get_product_list():
 def insert_user(user):
     return 0
 
+def get_backend_url(service_name: str) -> str|None:
+    try:
+        if service_name not in BACKEND_SERVICES:
+            raise ValueError(f"Backend service '{service_name}' not found")
+
+        return BACKEND_SERVICES[service_name]
+    except Exception as e:
+        logging.error(e.args)
+
 @router.get("/users/{user_id}", include_in_schema=False)
 def get_users(user_id):
     try:
@@ -132,7 +141,7 @@ async def product_gateway(request: Request, product_id: int):
     try:
         service_name = "products"
 
-        base_url = BACKEND_SERVICES[service_name]
+        base_url = get_backend_url(service_name)
 
         url = f"{base_url}/products/{product_id}"
 
