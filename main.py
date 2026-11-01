@@ -15,6 +15,14 @@ logging.basicConfig(level=logging.INFO,
                     filename="app.log"
                     )
 
+BACKEND_SERVICES = {
+    "products": "http://127.0.0.1:10001",
+    "users": "http://127.0.0.1:10002",
+    "orders": "http://127.0.0.1:10003",
+    "payments": "http://127.0.0.1:10004",
+    "inventory": "http://127.0.0.1:10005",
+}
+
 # Creating pooled client connection
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -122,8 +130,11 @@ def list_products():
 @router.get("/api/products/{product_id}", include_in_schema=False)
 async def product_gateway(request: Request, product_id: int):
     try:
-        # start = time.perf_counter()
-        url = f"http://127.0.0.1:10001/products/{product_id}"
+        service_name = "products"
+
+        base_url = BACKEND_SERVICES[service_name]
+
+        url = f"{base_url}/products/{product_id}"
 
         # Reuse the request ID created by middleware
         req_id = request.state.request_id
@@ -135,7 +146,7 @@ async def product_gateway(request: Request, product_id: int):
         logging.info(
             "Forwarding request | id=%s | url=%s",
             req_id,
-            f"http://127.0.0.1:10001/products/{product_id}",
+            f"{url}",
         )
 
         client = request.app.state.http_client # Use the created connection instance
