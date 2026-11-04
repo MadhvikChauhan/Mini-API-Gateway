@@ -91,13 +91,28 @@ def insert_user(user):
     return 0
 
 def get_backend_url(service_name: str) -> str|None:
-    try:
-        if service_name not in BACKEND_SERVICES:
-            raise ValueError(f"Backend service '{service_name}' not found")
 
-        return BACKEND_SERVICES[service_name]
-    except Exception as e:
-        logging.error(e.args)
+    if service_name not in BACKEND_SERVICES:
+        raise ValueError(f"Backend service '{service_name}' not found")
+
+    return BACKEND_SERVICES[service_name]
+
+
+def get_service_name(request:Request):
+
+    endpoint_path = request.url.path
+    path_segments = endpoint_path.split("/")
+
+    if len(path_segments) < 3 or path_segments[1] != "api":
+        raise ValueError("Invalid API path")
+
+    service_name = path_segments[2]
+
+    if service_name not in BACKEND_SERVICES:
+        raise ValueError(f"Unknown backend service: {service_name}")
+
+    return service_name
+
 
 @router.get("/users/{user_id}", include_in_schema=False)
 def get_users(user_id):
@@ -139,7 +154,8 @@ def list_products():
 @router.get("/api/products/{product_id}", include_in_schema=False)
 async def product_gateway(request: Request, product_id: int):
     try:
-        service_name = "products"
+
+        service_name = get_service_name(request)
 
         base_url = get_backend_url(service_name)
 
