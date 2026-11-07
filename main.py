@@ -150,16 +150,19 @@ def list_products():
 
 
 
-
-@router.get("/api/products/{product_id}", include_in_schema=False)
-async def product_gateway(request: Request, product_id: int):
+@router.api_route("/api/{url_path:path}", methods=['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'])
+async def general_gateway(request: Request, url_path):
     try:
 
         service_name = get_service_name(request)
 
         base_url = get_backend_url(service_name)
+        backend_path = url_path[len(service_name):].lstrip("/")
+        url = f"{base_url}/{service_name}"
 
-        url = f"{base_url}/products/{product_id}"
+        if backend_path:
+            url = f"{url}/{backend_path}"
+        method = request.method
 
         # Reuse the request ID created by middleware
         req_id = request.state.request_id
@@ -176,10 +179,12 @@ async def product_gateway(request: Request, product_id: int):
 
         client = request.app.state.http_client # Use the created connection instance
 
-        response = await client.get(
-            url,
+        response = await client.request(
+            method=method,
+            url=url,
             headers=http_data,
             params=request.query_params,
+            content=await request.body(),
         )
 
         logging.info(
