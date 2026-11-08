@@ -28,20 +28,21 @@ BACKEND_SERVICES = {
 API_KEYS = {
     "abc123": {
         "client": "dev",
-        "role": "admin",
-        "services": {
-            "products": ["GET", "POST", "PUT", "PATCH", "DELETE"],
-            "users": ["GET", "POST", "PUT", "PATCH", "DELETE"],
-            "orders": ["GET", "POST", "PUT", "PATCH", "DELETE"]
-        }
-    },
+        "role": "admin"
+        },
     "xyz456": {
         "client": "user",
-        "role": "user",
-        "services": {
-            "products": ["GET", "POST"]
-        }
+        "role": "user"
     }
+}
+
+ROLE_METHOD_MAP = {
+    'admin':{
+                "products": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+                "users": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+                "orders": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+            },
+    'user':{"products": ["GET", "POST"]}
 }
 
 async def verify_api_key(api_key: str = Header(default=None, alias="X-API-Key")):
@@ -200,6 +201,30 @@ async def general_gateway(request: Request, url_path, client_data=Depends(verify
     try:
         print(client_data)
         service_name = get_service_name(request)
+        method = request.method
+        role = client_data.get("role")
+
+        role_permissions = ROLE_METHOD_MAP.get(role)
+
+        if role_permissions is None:
+            raise HTTPException(
+                status_code=403,
+                detail="Invalid or unauthorized role"
+            )
+
+        allowed_methods = role_permissions.get(service_name)
+
+        if allowed_methods is None:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not authorized to access this service"
+            )
+
+        if method not in allowed_methods:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not authorized to perform this operation"
+            )
 
         base_url = get_backend_url(service_name)
         backend_path = url_path[len(service_name):].lstrip("/")
@@ -207,7 +232,7 @@ async def general_gateway(request: Request, url_path, client_data=Depends(verify
 
         if backend_path:
             url = f"{url}/{backend_path}"
-        method = request.method
+
 
         # Reuse the request ID created by middleware
         req_id = request.state.request_id
@@ -224,18 +249,7 @@ async def general_gateway(request: Request, url_path, client_data=Depends(verify
 
         client = request.app.state.http_client # Use the created connection instance
 
-        if service_name not in client_data["services"]:
-            raise HTTPException(
-                status_code=403,
-                detail="You are not authorized to access this service"
-            )
-        allowed_methods = client_data["services"][service_name]
 
-        if method not in allowed_methods:
-            raise HTTPException(
-                status_code=403,
-                detail="You are not authorized to perform this operation"
-            )
 
         response = await client.request(
             method=method,
