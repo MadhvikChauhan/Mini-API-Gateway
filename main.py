@@ -29,12 +29,18 @@ API_KEYS = {
     "abc123": {
         "client": "dev",
         "role": "admin",
-        "services": ["products", "users", "orders"]
+        "services": {
+            "products": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+            "users": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+            "orders": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+        }
     },
     "xyz456": {
         "client": "user",
         "role": "user",
-        "services": ["products"]
+        "services": {
+            "products": ["GET", "POST"]
+        }
     }
 }
 
@@ -222,6 +228,13 @@ async def general_gateway(request: Request, url_path, client_data=Depends(verify
             raise HTTPException(
                 status_code=403,
                 detail="You are not authorized to access this service"
+            )
+        allowed_methods = client_data["services"][service_name]
+
+        if method not in allowed_methods:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not authorized to perform this operation"
             )
 
         response = await client.request(
