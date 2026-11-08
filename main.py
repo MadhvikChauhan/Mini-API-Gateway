@@ -2,6 +2,8 @@ from http import HTTPStatus
 from http.client import responses
 from contextlib import asynccontextmanager
 import httpx
+import secrets
+from fastapi import Header, Depends
 from fastapi import FastAPI, APIRouter, Request, status, Response, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +24,41 @@ BACKEND_SERVICES = {
     "payments": "http://127.0.0.1:10004",
     "inventory": "http://127.0.0.1:10005",
 }
+
+API_KEYS = {
+    "abc123": {
+        "client": "dev",
+        "role": "admin"
+    },
+    "xyz456": {
+        "client": "user",
+        "role": "user"
+    }
+}
+
+async def verify_api_key(api_key: str = Header(default=None, alias="X-API-Key")):
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="API key is missing"
+        )
+
+    client_data = next(
+        (
+            data
+            for stored_key, data in API_KEYS.items()
+            if secrets.compare_digest(api_key, stored_key)
+        ),
+        None
+    )
+
+    if client_data is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key"
+        )
+
+    return client_data
 
 # Creating pooled client connection
 @asynccontextmanager
@@ -151,9 +188,9 @@ def list_products():
 
 
 @router.api_route("/api/{url_path:path}", methods=['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'])
-async def general_gateway(request: Request, url_path):
+async def general_gateway(request: Request, url_path, client_data=Depends(verify_api_key)):
     try:
-
+        print(client_data)
         service_name = get_service_name(request)
 
         base_url = get_backend_url(service_name)
