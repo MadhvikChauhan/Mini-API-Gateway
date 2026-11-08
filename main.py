@@ -28,11 +28,13 @@ BACKEND_SERVICES = {
 API_KEYS = {
     "abc123": {
         "client": "dev",
-        "role": "admin"
+        "role": "admin",
+        "services": ["products", "users", "orders"]
     },
     "xyz456": {
         "client": "user",
-        "role": "user"
+        "role": "user",
+        "services": ["products"]
     }
 }
 
@@ -215,6 +217,12 @@ async def general_gateway(request: Request, url_path, client_data=Depends(verify
         )
 
         client = request.app.state.http_client # Use the created connection instance
+
+        if service_name not in client_data["services"]:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not authorized to access this service"
+            )
 
         response = await client.request(
             method=method,
