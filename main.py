@@ -12,29 +12,76 @@ import logging
 import requests
 import uuid
 import time
+import dotenv
+import os
+from pathlib import Path
+from datetime import datetime, timedelta, timezone
+import json
+import hashlib
+
+ENV_FILE = Path(__file__).resolve().parent / "mini_gateway.env"
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
                     filename="app.log"
                     )
+file_path = Path(__file__).resolve().parent / "config.json"
 
 BACKEND_SERVICES = {
     "products": "http://127.0.0.1:10001",
-    "users": "http://127.0.0.1:10002",
+    "users": "http://127.0.0.1:10006",
     "orders": "http://127.0.0.1:10003",
     "payments": "http://127.0.0.1:10004",
     "inventory": "http://127.0.0.1:10005",
 }
 
-API_KEYS = {
-    "abc123": {
+dotenv.load_dotenv(ENV_FILE)
+DEV_API_KEY  = os.getenv('DEV_API_KEY')
+QA_API_KEY = os.getenv('QA_API_KEY')
+
+
+if not DEV_API_KEY or not QA_API_KEY:
+    raise RuntimeError("Required API keys are missing from environment")
+
+if DEV_API_KEY == QA_API_KEY:
+    raise RuntimeError("API keys must be unique")
+
+def save_api_keys(stats):
+    data = {"api_keys":stats}
+    with open(file_path, 'w') as f:
+        json.dump(data, f, indent=4)
+
+def hash_api_key(api_key: str) -> str:
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def load_api_keys():
+    if file_path.exists():
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+            return data['api_keys']
+
+    else:
+        initial_data = initialize_api_keys()
+        save_api_keys(initial_data)
+        return initial_data
+
+def initialize_api_keys():
+    dev_api_key, qa_api_key = DEV_API_KEY, QA_API_KEY
+    hashed_dev_key, hashed_qa_key = hash_api_key(dev_api_key), hash_api_key(qa_api_key)
+    auth_data = {hashed_dev_key: {
         "client": "dev",
-        "role": "admin"
+        "role": "admin",
+        "expires_at": int(datetime.timestamp(datetime.now(timezone.utc) + timedelta(hours=1)))
         },
-    "xyz456": {
+    hashed_qa_key: {
         "client": "user",
-        "role": "user"
-    }
-}
+        "role": "user",
+        "expires_at": int(datetime.timestamp(datetime.now(timezone.utc) + timedelta(hours=1)))
+    }}
+    return auth_data
+
+
+ACTIVE_API_KEYS = load_api_keys()
 
 ROLE_METHOD_MAP = {
     'admin':{
@@ -45,18 +92,44 @@ ROLE_METHOD_MAP = {
     'user':{"products": ["GET", "POST"]}
 }
 
+
+def generate_api_key():
+    return secrets.token_urlsafe(32)
+
+
+def revoke_api_key(api_key: str):
+    hashed_key = hash_api_key(api_key)
+    if hashed_key not in ACTIVE_API_KEYS:
+        return False
+    ACTIVE_API_KEYS.pop(hashed_key)
+    save_api_keys(ACTIVE_API_KEYS)
+    return True
+
+def register_api_key(client: str, role: str, expiry_hours:float=1):
+    if role not in ROLE_METHOD_MAP:
+        raise ValueError(f"Invalid role: {role}")
+    if expiry_hours <= 0:
+        raise ValueError(f"Invalid duration: {expiry_hours}")
+    new_key = generate_api_key()
+    hashed_new_key = hash_api_key(new_key)
+    ACTIVE_API_KEYS[hashed_new_key] = {'client':client, 'role':role,
+                                "expires_at": int(datetime.timestamp(datetime.now(timezone.utc) + timedelta(hours=expiry_hours)))}
+
+    save_api_keys(ACTIVE_API_KEYS)
+    return new_key
+
 async def verify_api_key(api_key: str = Header(default=None, alias="X-API-Key")):
     if not api_key:
         raise HTTPException(
             status_code=401,
             detail="API key is missing"
         )
-
+    hashed_key = hash_api_key(api_key)
     client_data = next(
         (
             data
-            for stored_key, data in API_KEYS.items()
-            if secrets.compare_digest(api_key, stored_key)
+            for stored_key, data in ACTIVE_API_KEYS.items()
+            if secrets.compare_digest(hashed_key, stored_key)
         ),
         None
     )
@@ -66,6 +139,16 @@ async def verify_api_key(api_key: str = Header(default=None, alias="X-API-Key"))
             status_code=401,
             detail="Invalid API key"
         )
+
+    current_time = int(datetime.now(timezone.utc).timestamp())
+    expires_at = client_data["expires_at"]
+
+    if current_time >= expires_at:
+        raise HTTPException(
+            status_code=401,
+            detail="Token expired"
+        )
+
 
     return client_data
 
@@ -239,6 +322,7 @@ async def general_gateway(request: Request, url_path, client_data=Depends(verify
 
         # Forward incoming headers and attach the same request ID
         http_data = dict(request.headers)
+        http_data.pop("x-api-key", None)
         http_data["X-Request-ID"] = req_id
 
         logging.info(
@@ -339,3 +423,4 @@ if __name__ == "__main__":
         host="127.0.0.1",
         port=10002
     )
+    # curl -i -H "X-API-Key: xGRvh2rqo3aCFVtgzWt8jUaraP0I44ALASXofmtsB-4" -X GET http://127.0.0.1:10002/api/products/1
